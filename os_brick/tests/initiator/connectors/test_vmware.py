@@ -152,6 +152,7 @@ class VmdkConnectorTestCase(test_connector.ConnectorTestCase):
                 'vmdk_size': units.Gi,
                 'datastore': 'ds-1',
                 'datacenter': 'dc-1',
+                'temp_ds_summary': mock.Mock()
                 }
 
     @mock.patch.object(VMDK_CONNECTOR, '_load_config')
