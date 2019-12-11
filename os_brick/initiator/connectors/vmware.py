@@ -223,6 +223,11 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                   datacenter=dc_ref)
         session.wait_for_task(task)
 
+        cf = session.vim.client.factory
+        dest_spec = cf.create('ns0:VirtualDiskSpec')
+        dest_spec.adapterType = 'lsiLogic'
+        dest_spec.diskType = 'thick'
+
         src = six.text_type(ds_path)
         LOG.debug("Copying %(src)s to %(dest)s", {'src': src,
                                                   'dest': vmdk_path})
@@ -231,6 +236,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                   disk_mgr,
                                   sourceName=src,
                                   sourceDatacenter=dc_ref,
+                                  destSpec=dest_spec,
                                   destName=vmdk_path,
                                   destDatacenter=dc_ref)
         session.wait_for_task(task)
