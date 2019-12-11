@@ -270,8 +270,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                     raise exception.BrickException(message=msg)
 
                 ds_ref = vim_util.get_moref(
-                    connection_properties['temp_ds_summary'].datastore,
-                    "Datastore")
+                    connection_properties['temp_datastore'], "Datastore")
                 dc_ref = vim_util.get_moref(
                     connection_properties['datacenter'], "Datacenter")
                 vmdk_path = connection_properties['vmdk_path']
