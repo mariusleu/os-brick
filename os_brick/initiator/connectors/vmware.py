@@ -225,7 +225,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
         cf = session.vim.client.factory
         dest_spec = cf.create('ns0:VirtualDiskSpec')
-        dest_spec.adapterType = 'lsiLogic'
+        # dest_spec.adapterType = 'lsiLogic'
         dest_spec.diskType = 'thin'
 
         src = six.text_type(ds_path)
