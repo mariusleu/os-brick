@@ -244,6 +244,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         new_disk_device = volume_ops.disk_spec(
             capacity_in_kb=disk_device.capacityInKB,
             unit_number=0,
+            key=-101,
+            controller_key=disk_device.controllerKey,
             backing=new_backing)
         new_disk_spec = volume_ops.device_spec(device=new_disk_device,
                                                file_operation='create')
@@ -354,11 +356,13 @@ class VolumeOps:
         return new_backing
 
     def disk_spec(self, capacity_in_kb=None, unit_number=0,
-                  backing=None, spec=None):
+                  backing=None, controller_key=None, key=None, spec=None):
         new_disk_device = spec or self._client_factory.create("ns0:VirtualDisk")
         new_disk_device.capacityInKB = capacity_in_kb
         new_disk_device.unitNumber = unit_number
         new_disk_device.backing = backing
+        new_disk_device.controllerKey = controller_key
+        new_disk_device.key = key
         return new_disk_device
 
     def device_spec(self, device=None, operation=None,
