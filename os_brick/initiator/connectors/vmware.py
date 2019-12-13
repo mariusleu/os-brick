@@ -214,26 +214,11 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                 cookies, temp_ds_path.rel_path, os.path.getsize(
                     tmp_file_path), cacerts, self._timeout)
 
-        # Delete the current volume vmdk because the copy operation does not
-        # overwrite.
         volume_ops = VolumeOps(session=session)
-        LOG.debug("Deleting %s", vmdk_path)
-        disk_mgr = session.vim.service_content.virtualDiskManager
-        task = session.invoke_api(session.vim,
-                                  'DeleteVirtualDisk_Task',
-                                  disk_mgr,
-                                  name=vmdk_path,
-                                  datacenter=dc_ref)
-        session.wait_for_task(task)
-
-        cf = session.vim.client.factory
-        dest_spec = cf.create('ns0:VirtualDiskSpec')
-        # dest_spec.adapterType = 'lsiLogic'
-        dest_spec.diskType = 'thin'
 
         src = six.text_type(temp_ds_path)
-        disk_device = volume_ops.get_disk_device(backing)
         # 1. destroy old disk and attach new one
+        disk_device = volume_ops.get_disk_device(backing)
         disk_spec = volume_ops.device_spec(device=disk_device,
                                            operation="remove",
                                            file_operation="destroy")
