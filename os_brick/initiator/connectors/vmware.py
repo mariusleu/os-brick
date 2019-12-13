@@ -248,7 +248,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             controller_key=disk_device.controllerKey,
             backing=new_backing)
         new_disk_spec = volume_ops.device_spec(device=new_disk_device,
-                                               file_operation='create')
+                                               operation='add')
         reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec,
                                                                 new_disk_spec])
         volume_ops.reconfig_vm(backing, reconfig_spec)
