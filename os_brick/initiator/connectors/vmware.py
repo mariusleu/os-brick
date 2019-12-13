@@ -373,7 +373,7 @@ class VolumeOps:
 
     def relocate_vm(self, vm_ref, spec):
         task = self._session.invoke_api(self._session.vim,
-                                        "ReconfigVM_Task",
+                                        "RelocateVM_Task",
                                         vm_ref,
                                         spec=spec)
         self._session.wait_for_task(task)
