@@ -18,6 +18,7 @@ import tempfile
 
 from oslo_log import log as logging
 from oslo_utils import fileutils
+
 try:
     from oslo_vmware import api
     from oslo_vmware import exceptions as oslo_vmw_exceptions
@@ -189,18 +190,19 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                                   cacerts=cacerts)
         image_transfer._start_transfer(read_handle, write_handle, timeout_secs)
 
-    def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path):
+    def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path,
+                    backing, temp_ds_ref, volume_id):
         # The restored volume is in compressed (streamOptimized) format.
         # So we upload it to a temporary location in vCenter datastore and copy
         # the compressed vmdk to the volume vmdk. The copy operation
         # decompresses the disk to a format suitable for attaching to Nova
         # instances in vCenter.
-        dstore = datastore.get_datastore_by_ref(session, ds_ref)
-        ds_path = dstore.build_path(
+        temp_dstore = datastore.get_datastore_by_ref(session, temp_ds_ref)
+        temp_ds_path = temp_dstore.build_path(
             VmdkConnector.TMP_IMAGES_DATASTORE_FOLDER_PATH,
             os.path.basename(tmp_file_path))
         self._create_temp_ds_folder(
-            session, six.text_type(ds_path.parent), dc_ref)
+            session, six.text_type(temp_ds_path.parent), dc_ref)
 
         with open(tmp_file_path, "rb") as tmp_file:
             dc_name = session.invoke_api(
@@ -208,12 +210,13 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             cookies = session.vim.client.options.transport.cookiejar
             cacerts = self._ca_file if self._ca_file else not self._insecure
             self._upload_vmdk(
-                tmp_file, self._ip, self._port, dc_name, dstore.name, cookies,
-                ds_path.rel_path, os.path.getsize(tmp_file_path), cacerts,
-                self._timeout)
+                tmp_file, self._ip, self._port, dc_name, temp_dstore.name,
+                cookies, temp_ds_path.rel_path, os.path.getsize(
+                    tmp_file_path), cacerts, self._timeout)
 
         # Delete the current volume vmdk because the copy operation does not
         # overwrite.
+        volume_ops = VolumeOps(session=session)
         LOG.debug("Deleting %s", vmdk_path)
         disk_mgr = session.vim.service_content.virtualDiskManager
         task = session.invoke_api(session.vim,
@@ -228,28 +231,37 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         # dest_spec.adapterType = 'lsiLogic'
         dest_spec.diskType = 'thin'
 
-        src = six.text_type(ds_path)
-        LOG.debug("Copying %(src)s to %(dest)s", {'src': src,
-                                                  'dest': vmdk_path})
-        task = session.invoke_api(session.vim,
-                                  'CopyVirtualDisk_Task',
-                                  disk_mgr,
-                                  sourceName=src,
-                                  sourceDatacenter=dc_ref,
-                                  destSpec=dest_spec,
-                                  destName=vmdk_path,
-                                  destDatacenter=dc_ref)
-        session.wait_for_task(task)
+        src = six.text_type(temp_ds_path)
+        disk_device = volume_ops.get_disk_device(backing)
+        # 1. destroy old disk and attach new one
+        disk_spec = volume_ops.device_spec(device=disk_device,
+                                           operation="remove",
+                                           file_operation="destroy")
+        # TODO do not hardcode these parameters
+        new_backing = volume_ops.backing_spec(thin_provisioned=True,
+                                              file_name=src,
+                                              disk_mode='persistent')
+        new_disk_device = volume_ops.disk_spec(
+            capacity_in_kb=disk_device.capacityInKB,
+            unit_number=0,
+            backing=new_backing)
+        new_disk_spec = volume_ops.device_spec(device=new_disk_device,
+                                               file_operation='create')
+        reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec,
+                                                                new_disk_spec])
+        volume_ops.reconfig_vm(backing, reconfig_spec)
 
-        # Delete the compressed vmdk at the temporary location.
-        LOG.debug("Deleting %s", src)
-        file_mgr = session.vim.service_content.fileManager
-        task = session.invoke_api(session.vim,
-                                  'DeleteDatastoreFile_Task',
-                                  file_mgr,
-                                  name=src,
-                                  datacenter=dc_ref)
-        session.wait_for_task(task)
+        # 3. rename new disk backing uuid
+        backing = volume_ops.get_backing_by_uuid(volume_id)
+        disk_device = volume_ops.get_disk_device(backing)
+        disk_device.backing.uuid = volume_id
+        disk_spec = volume_ops.device_spec(device=disk_device, operation="edit")
+        reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec])
+        volume_ops.reconfig_vm(backing, reconfig_spec)
+
+        # 4. relocate vm
+        relocate_spec = volume_ops.relocate_spec(datastore=ds_ref)
+        volume_ops.relocate_vm(backing, relocate_spec)
 
     def disconnect_volume(self, connection_properties, device_info,
                           force=False, ignore_errors=False):
@@ -275,13 +287,16 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                            connection_properties['volume_id'])
                     raise exception.BrickException(message=msg)
 
-                ds_ref = vim_util.get_moref(
+                temp_ds_ref = vim_util.get_moref(
                     connection_properties['temp_datastore'], "Datastore")
+                ds_ref = vim_util.get_moref(
+                    connection_properties['datastore'], "Datastore")
                 dc_ref = vim_util.get_moref(
                     connection_properties['datacenter'], "Datacenter")
                 vmdk_path = connection_properties['vmdk_path']
                 self._disconnect(
-                    tmp_file_path, session, ds_ref, dc_ref, vmdk_path)
+                    tmp_file_path, session, ds_ref, dc_ref, vmdk_path, backing,
+                    temp_ds_ref, connection_properties['volume_id'])
         finally:
             os.remove(tmp_file_path)
             if session:
@@ -289,3 +304,99 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
     def extend_volume(self, connection_properties):
         raise NotImplementedError
+
+
+class VolumeOps:
+
+    def __init__(self, session):
+        self._session = session
+        self._client_factory = self._session.vim.client.factory
+
+    def get_disk_device(self, backing):
+        """Get the virtual device corresponding to disk."""
+        hardware_devices = self._session.invoke_api(vim_util,
+                                                    'get_object_property',
+                                                    self._session.vim,
+                                                    backing,
+                                                    'config.hardware.device')
+        if hardware_devices.__class__.__name__ == "ArrayOfVirtualDevice":
+            hardware_devices = hardware_devices.VirtualDevice
+        for device in hardware_devices:
+            if device.__class__.__name__ == "VirtualDisk":
+                return device
+
+        LOG.error("Virtual disk device of backing: %s not found.", backing)
+        return None
+
+    def relocate_spec(self, datastore=None, resource_pool=None, host=None,
+                      disk_move_type=None):
+        relocate_spec = self._client_factory.create(
+            'ns0:VirtualMachineRelocateSpec')
+        relocate_spec.datastore = datastore
+        relocate_spec.pool = resource_pool
+        relocate_spec.host = host
+        relocate_spec.diskMoveType = disk_move_type
+        return relocate_spec
+
+    def reconfig_spec(self, device_change=None):
+        spec = self._client_factory.create("ns0:VirtualMachineConfigSpec")
+        spec.deviceChange = device_change
+        return spec
+
+    def backing_spec(self, thin_provisioned=None, file_name=None,
+                     disk_mode=None, spec=None):
+        new_backing = spec or self._client_factory.create(
+            "ns0:VirtualDiskFlatVer2BackingInfo")
+        if thin_provisioned:
+            new_backing.thinProvisioned = thin_provisioned
+        new_backing.fileName = file_name
+        new_backing.diskMode = disk_mode
+        return new_backing
+
+    def disk_spec(self, capacity_in_kb=None, unit_number=0,
+                  backing=None, spec=None):
+        new_disk_device = spec or self._client_factory.create("ns0:VirtualDisk")
+        new_disk_device.capacityInKB = capacity_in_kb
+        new_disk_device.unitNumber = unit_number
+        new_disk_device.backing = backing
+        return new_disk_device
+
+    def device_spec(self, device=None, operation=None,
+                    file_operation=None, spec=None):
+        disk_spec = spec or self._client_factory.create(
+            "ns0:VirtualDeviceConfigSpec")
+        disk_spec.device = device
+        disk_spec.operation = operation
+        disk_spec.fileOperation = file_operation
+        return disk_spec
+
+    def reconfig_vm(self, backing, reconfig_spec):
+        LOG.debug("Reconfiguring backing VM: %(backing)s with spec: %(spec)s.",
+                  {'backing': backing,
+                   'spec': reconfig_spec})
+        reconfig_task = self._session.invoke_api(self._session.vim,
+                                                 "ReconfigVM_Task",
+                                                 backing,
+                                                 spec=reconfig_spec)
+        LOG.debug("Task: %s created for reconfiguring backing VM.",
+                  reconfig_task)
+        self._session.wait_for_task(reconfig_task)
+
+    def relocate_vm(self, vm_ref, spec):
+        task = self._session.invoke_api(self._session.vim,
+                                        "ReconfigVM_Task",
+                                        vm_ref,
+                                        spec=spec)
+        self._session.wait_for_task(task)
+
+    def get_backing_by_uuid(self, uuid):
+        LOG.debug("Get ref by UUID: %s.", uuid)
+        result = self._session.invoke_api(
+            self._session.vim,
+            'FindAllByUuid',
+            self._session.vim.service_content.searchIndex,
+            uuid=uuid,
+            vmSearch=True,
+            instanceUuid=True)
+        if result:
+            return result[0]
