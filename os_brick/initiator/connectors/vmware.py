@@ -246,10 +246,6 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec])
         volume_ops.reconfig_vm(backing, reconfig_spec)
 
-        # 4. relocate vm
-        relocate_spec = volume_ops.relocate_spec(datastore=ds_ref)
-        volume_ops.relocate_vm(backing, relocate_spec)
-
     def disconnect_volume(self, connection_properties, device_info,
                           force=False, ignore_errors=False):
         tmp_file_path = device_info['path']
@@ -334,8 +330,7 @@ class VolumeOps:
                      disk_mode=None, spec=None):
         new_backing = spec or self._client_factory.create(
             "ns0:VirtualDiskFlatVer2BackingInfo")
-        if thin_provisioned:
-            new_backing.thinProvisioned = thin_provisioned
+        new_backing.thinProvisioned = thin_provisioned
         new_backing.fileName = file_name
         new_backing.diskMode = disk_mode
         return new_backing
