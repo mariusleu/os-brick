@@ -219,6 +219,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         src = six.text_type(temp_ds_path)
         # 1. destroy old disk and attach new one
         disk_device = volume_ops.get_disk_device(backing)
+        capacityInKB = disk_device.capacityInKB
         disk_spec = volume_ops.device_spec(device=disk_device,
                                            operation="remove",
                                            file_operation="destroy")
@@ -227,8 +228,18 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         backing = volume_ops.get_backing_by_uuid(volume_id)
 
         # TODO do not hardcode these parameters
-        disk_device.backing.fileName = src
-        new_disk_spec = volume_ops.device_spec(device=disk_device,
+        new_backing = volume_ops.backing_spec(thin_provisioned=False,
+                                              datastore=temp_ds_ref,
+                                              file_name=src,
+                                              disk_mode='persistent')
+        LOG.info("New CapacityInKB=%s" % capacityInKB)
+        new_disk_device = volume_ops.disk_spec(
+            capacity_in_kb=capacityInKB,
+            unit_number=0,
+            key=-101,
+            controller_key=disk_device.controllerKey,
+            backing=new_backing)
+        new_disk_spec = volume_ops.device_spec(device=new_disk_device,
                                                operation='add')
         reconfig_spec = volume_ops.reconfig_spec(device_change=[new_disk_spec])
         volume_ops.reconfig_vm(backing, reconfig_spec)
