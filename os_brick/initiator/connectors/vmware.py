@@ -191,7 +191,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         image_transfer._start_transfer(read_handle, write_handle, timeout_secs)
 
     def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path,
-                    backing, temp_ds_ref, volume_id):
+                    backing, temp_ds_ref, volume_id, profile_id):
         # The restored volume is in compressed (streamOptimized) format.
         # So we upload it to a temporary location in vCenter datastore and copy
         # the compressed vmdk to the volume vmdk. The copy operation
@@ -232,7 +232,6 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                               datastore=temp_ds_ref,
                                               file_name=src,
                                               disk_mode='persistent')
-        LOG.info("New CapacityInKB=%s" % capacityInKB)
         new_disk_device = volume_ops.disk_spec(
             capacity_in_kb=capacityInKB,
             unit_number=0,
@@ -285,7 +284,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                 vmdk_path = connection_properties['vmdk_path']
                 self._disconnect(
                     tmp_file_path, session, ds_ref, dc_ref, vmdk_path, backing,
-                    temp_ds_ref, connection_properties['volume_id'])
+                    temp_ds_ref, connection_properties['volume_id'],
+                    connection_properties['profile_id'])
         finally:
             os.remove(tmp_file_path)
             if session:
@@ -356,12 +356,18 @@ class VolumeOps:
         return new_disk_device
 
     def device_spec(self, device=None, operation=None,
-                    file_operation=None, spec=None):
+                    file_operation=None, profile_id=None, spec=None):
         disk_spec = spec or self._client_factory.create(
             "ns0:VirtualDeviceConfigSpec")
         disk_spec.device = device
         disk_spec.operation = operation
         disk_spec.fileOperation = file_operation
+        if profile_id is not None:
+            LOG.info("Setting profile_id=%s" % profile_id)
+            disk_profile = self._client_factory.create(
+                'ns0:VirtualMachineDefinedProfileSpec')
+            disk_profile.profileId = profile_id
+            disk_spec.profile = [disk_profile]
         return disk_spec
 
     def reconfig_vm(self, backing, reconfig_spec):
