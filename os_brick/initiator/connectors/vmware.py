@@ -227,7 +227,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         backing = volume_ops.get_backing_by_uuid(volume_id)
 
         # TODO do not hardcode these parameters
-        new_backing = volume_ops.backing_spec(thin_provisioned=True,
+        new_backing = volume_ops.backing_spec(eagerly_scrub=True,
                                               datastore=temp_ds_ref,
                                               file_name=src,
                                               disk_mode='persistent')
@@ -330,11 +330,14 @@ class VolumeOps:
         spec.deviceChange = device_change
         return spec
 
-    def backing_spec(self, thin_provisioned=None, file_name=None,
-                     disk_mode=None, datastore=None, spec=None):
+    def backing_spec(self, thin_provisioned=None, eagerly_scrub=None,
+                     file_name=None, disk_mode=None, datastore=None, spec=None):
         new_backing = spec or self._client_factory.create(
             "ns0:VirtualDiskFlatVer2BackingInfo")
-        new_backing.thinProvisioned = thin_provisioned
+        if thin_provisioned is not None:
+            new_backing.thinProvisioned = thin_provisioned
+        if eagerly_scrub is not None:
+            new_backing.eagerlyScrub = eagerly_scrub
         new_backing.datastore = datastore
         new_backing.fileName = file_name
         new_backing.diskMode = disk_mode
