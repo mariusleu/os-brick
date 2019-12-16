@@ -192,12 +192,18 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
     def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path,
                     backing, temp_ds_ref, volume_id, profile_id):
+
+        volume_ops = VolumeOps(session=session)
+
+        relocate_spec = volume_ops.relocate_spec(datastore=temp_ds_ref)
+        volume_ops.relocate_vm(backing, relocate_spec)
+        backing = volume_ops.get_backing_by_uuid(volume_id)
         # The restored volume is in compressed (streamOptimized) format.
         # So we upload it to a temporary location in vCenter datastore and copy
         # the compressed vmdk to the volume vmdk. The copy operation
         # decompresses the disk to a format suitable for attaching to Nova
         # instances in vCenter.
-        temp_dstore = datastore.get_datastore_by_ref(session, temp_ds_ref)
+        temp_dstore = datastore.get_datastore_by_ref(session, ds_ref)
         temp_ds_path = temp_dstore.build_path(
             VmdkConnector.TMP_IMAGES_DATASTORE_FOLDER_PATH,
             os.path.basename(tmp_file_path))
@@ -212,44 +218,43 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             self._upload_vmdk(
                 tmp_file, self._ip, self._port, dc_name, temp_dstore.name,
                 cookies, temp_ds_path.rel_path, os.path.getsize(
-                    tmp_file_path), cacerts, self._timeout)
+                    tmp_file_path), cacerts,self._timeout)
 
-        volume_ops = VolumeOps(session=session)
+        # Delete the current volume vmdk because the copy operation does not
+        # overwrite.
+        LOG.debug("Deleting %s", vmdk_path)
+        disk_mgr = session.vim.service_content.virtualDiskManager
+        task = session.invoke_api(session.vim,
+                                  'DeleteVirtualDisk_Task',
+                                  disk_mgr,
+                                  name=vmdk_path,
+                                  datacenter=dc_ref)
+        session.wait_for_task(task)
 
         src = six.text_type(temp_ds_path)
-        # 1. destroy old disk and attach new one
-        disk_device = volume_ops.get_disk_device(backing)
-        capacityInKB = disk_device.capacityInKB
-        disk_spec = volume_ops.device_spec(device=disk_device,
-                                           operation="remove",
-                                           file_operation="destroy")
-        reconfig_spec = volume_ops.reconfig_spec(device_change=disk_spec)
-        volume_ops.reconfig_vm(backing, reconfig_spec)
-        backing = volume_ops.get_backing_by_uuid(volume_id)
+        LOG.debug("Copying %(src)s to %(dest)s", {'src': src,
+                                                  'dest': vmdk_path})
+        task = session.invoke_api(session.vim,
+                                  'CopyVirtualDisk_Task',
+                                  disk_mgr,
+                                  sourceName=src,
+                                  sourceDatacenter=dc_ref,
+                                  destName=vmdk_path,
+                                  destDatacenter=dc_ref)
+        session.wait_for_task(task)
 
-        # TODO do not hardcode these parameters
-        new_backing = volume_ops.backing_spec(thin_provisioned=False,
-                                              datastore=temp_ds_ref,
-                                              file_name=src,
-                                              disk_mode='persistent')
-        new_disk_device = volume_ops.disk_spec(
-            capacity_in_kb=capacityInKB,
-            unit_number=0,
-            key=-101,
-            controller_key=disk_device.controllerKey,
-            backing=new_backing)
-        new_disk_spec = volume_ops.device_spec(device=new_disk_device,
-                                               operation='add')
-        reconfig_spec = volume_ops.reconfig_spec(device_change=[new_disk_spec])
-        volume_ops.reconfig_vm(backing, reconfig_spec)
+        # Delete the compressed vmdk at the temporary location.
+        LOG.debug("Deleting %s", src)
+        file_mgr = session.vim.service_content.fileManager
+        task = session.invoke_api(session.vim,
+                                  'DeleteDatastoreFile_Task',
+                                  file_mgr,
+                                  name=src,
+                                  datacenter=dc_ref)
+        session.wait_for_task(task)
 
-        # 3. rename new disk backing uuid
-        backing = volume_ops.get_backing_by_uuid(volume_id)
-        disk_device = volume_ops.get_disk_device(backing)
-        disk_device.backing.uuid = volume_id
-        disk_spec = volume_ops.device_spec(device=disk_device, operation="edit")
-        reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec])
-        volume_ops.reconfig_vm(backing, reconfig_spec)
+        relocate_spec = volume_ops.relocate_spec(datastore=ds_ref)
+        volume_ops.relocate_vm(backing, relocate_spec)
 
     def disconnect_volume(self, connection_properties, device_info,
                           force=False, ignore_errors=False):
