@@ -222,8 +222,13 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         disk_spec = volume_ops.device_spec(device=disk_device,
                                            operation="remove",
                                            file_operation="destroy")
+        reconfig_spec = volume_ops.reconfig_spec(device_change=disk_spec)
+        volume_ops.reconfig_vm(backing, reconfig_spec)
+        backing = volume_ops.get_backing_by_uuid(volume_id)
+
         # TODO do not hardcode these parameters
         new_backing = volume_ops.backing_spec(thin_provisioned=True,
+                                              datastore=temp_ds_ref,
                                               file_name=src,
                                               disk_mode='persistent')
         new_disk_device = volume_ops.disk_spec(
@@ -234,8 +239,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             backing=new_backing)
         new_disk_spec = volume_ops.device_spec(device=new_disk_device,
                                                operation='add')
-        reconfig_spec = volume_ops.reconfig_spec(device_change=[disk_spec,
-                                                                new_disk_spec])
+        reconfig_spec = volume_ops.reconfig_spec(device_change=[new_disk_spec])
         volume_ops.reconfig_vm(backing, reconfig_spec)
 
         # 3. rename new disk backing uuid
@@ -327,10 +331,11 @@ class VolumeOps:
         return spec
 
     def backing_spec(self, thin_provisioned=None, file_name=None,
-                     disk_mode=None, spec=None):
+                     disk_mode=None, datastore=None, spec=None):
         new_backing = spec or self._client_factory.create(
             "ns0:VirtualDiskFlatVer2BackingInfo")
         new_backing.thinProvisioned = thin_provisioned
+        new_backing.datastore = datastore
         new_backing.fileName = file_name
         new_backing.diskMode = disk_mode
         return new_backing
