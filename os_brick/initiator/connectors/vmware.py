@@ -193,8 +193,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         image_transfer._start_transfer(read_handle, write_handle, timeout_secs)
         return write_handle.get_imported_vm()
 
-    def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path,
-                    backing, temp_ds_ref, volume, volume_id, profile_id, rp_ref,
+    def _disconnect(self, tmp_file_path, session, volume, volume_id, rp_ref,
                     vm_folder_ref, import_spec, vmdk_size):
 
         volume_ops = VolumeOps(session=session)
@@ -290,20 +289,18 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                              "snapshots; cannot disconnect.") %
                            connection_properties['volume_id'])
                     raise exception.BrickException(message=msg)
-
-                temp_ds_ref = vim_util.get_moref(
-                    connection_properties['temp_datastore'], "Datastore")
-                ds_ref = vim_util.get_moref(
-                    connection_properties['datastore'], "Datastore")
-                dc_ref = vim_util.get_moref(
-                    connection_properties['datacenter'], "Datacenter")
-                vmdk_path = connection_properties['vmdk_path']
+                #
+                # temp_ds_ref = vim_util.get_moref(
+                #     connection_properties['temp_datastore'], "Datastore")
+                # ds_ref = vim_util.get_moref(
+                #     connection_properties['datastore'], "Datastore")
+                # dc_ref = vim_util.get_moref(
+                #     connection_properties['datacenter'], "Datacenter")
+                # vmdk_path = connection_properties['vmdk_path']
                 self._disconnect(
-                    tmp_file_path, session, ds_ref, dc_ref, vmdk_path, backing,
-                    temp_ds_ref,
+                    tmp_file_path, session,
                     connection_properties['volume'],
                     connection_properties['volume_id'],
-                    connection_properties['profile_id'],
                     connection_properties['rp_ref'],
                     connection_properties['vm_folder_ref'],
                     connection_properties['import_spec'],
