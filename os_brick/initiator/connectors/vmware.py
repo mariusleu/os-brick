@@ -236,8 +236,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             vm_import = volume_ops.import_spec(config_spec=vm_config_spec)
 
             try:
-                volume_ops.reconfig_vm(volume,
-                                       volume_ops.rename_spec(name + "-backup"))
+                volume_ops.rename_backing(volume, name + "-backup")
                 imported_vm = self._upload_vmdk(tmp_file,
                                                 self._ip,
                                                 self._port,
@@ -249,7 +248,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                                 vmdk_size)
                 volume_ops.delete_backing(volume)
             except oslo_vmw_exceptions.VimException as e:
-                volume_ops.reconfig_vm(volume, volume_ops.rename_spec(name))
+                volume_ops.rename_backing(volume, name)
                 raise e
 
         volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
@@ -369,6 +368,25 @@ class VolumeOps:
 
         LOG.error("Virtual disk device of backing: %s not found.", backing)
         return None
+
+    def rename_backing(self, backing, new_name):
+        """Rename backing VM.
+
+        :param backing: VM to be renamed
+        :param new_name: new VM name
+        """
+        LOG.info("Renaming backing VM: %(backing)s to %(new_name)s.",
+                 {'backing': backing,
+                  'new_name': new_name})
+        rename_task = self._session.invoke_api(self._session.vim,
+                                               "Rename_Task",
+                                               backing,
+                                               newName=new_name)
+        LOG.debug("Task: %s created for renaming VM.", rename_task)
+        self._session.wait_for_task(rename_task)
+        LOG.info("Backing VM: %(backing)s renamed to %(new_name)s.",
+                 {'backing': backing,
+                  'new_name': new_name})
 
     def update_backing_disk_uuid(self, backing, disk_uuid):
         """Update backing VM's disk UUID.
