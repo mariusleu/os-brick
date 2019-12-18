@@ -234,17 +234,24 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                 extra_config)
 
             vm_import = volume_ops.import_spec(config_spec=vm_config_spec)
-            volume_ops.delete_backing(volume)
-            imported_vm = self._upload_vmdk(tmp_file,
-                                            self._ip,
-                                            self._port,
-                                            self._timeout,
-                                            session,
-                                            rp_ref,
-                                            vm_folder_ref,
-                                            vm_import,
-                                            vmdk_size)
-            volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
+
+            try:
+                volume_ops.reconfig_vm(volume,
+                                       volume_ops.rename_spec(name + "-backup"))
+                imported_vm = self._upload_vmdk(tmp_file,
+                                                self._ip,
+                                                self._port,
+                                                self._timeout,
+                                                session,
+                                                rp_ref,
+                                                vm_folder_ref,
+                                                vm_import,
+                                                vmdk_size)
+                volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
+                volume_ops.delete_backing(volume)
+            except oslo_vmw_exceptions.VimException as e:
+                volume_ops.reconfig_vm(volume, volume_ops.rename_spec(name))
+                raise e
 
         # # Delete the current volume vmdk because the copy operation does not
         # # overwrite.
@@ -520,6 +527,11 @@ class VolumeOps:
             'ns0:VirtualMachineImportSpec')
         vm_import_spec.configSpec = config_spec
         return vm_import_spec
+
+    def rename_spec(self, name):
+        spec = self._client_factory.create('ns0:VirtualMachineFileInfo')
+        spec.name = name
+        return spec
 
     def config_spec(self, **kwargs):
         cf = self._session.vim.client.factory
