@@ -247,12 +247,12 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                                 vm_folder_ref,
                                                 vm_import,
                                                 vmdk_size)
-                volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
                 volume_ops.delete_backing(volume)
             except oslo_vmw_exceptions.VimException as e:
                 volume_ops.reconfig_vm(volume, volume_ops.rename_spec(name))
                 raise e
 
+        volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
         # # Delete the current volume vmdk because the copy operation does not
         # # overwrite.
         # LOG.debug("Deleting %s", vmdk_path)
