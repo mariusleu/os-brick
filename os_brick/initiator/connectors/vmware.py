@@ -234,7 +234,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                 extra_config)
 
             vm_import = volume_ops.import_spec(config_spec=vm_config_spec)
-
+            volume_ops.delete_backing(volume)
             imported_vm = self._upload_vmdk(tmp_file,
                                             self._ip,
                                             self._port,
@@ -244,7 +244,6 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                             vm_folder_ref,
                                             vm_import,
                                             vmdk_size)
-            volume_ops.delete_backing(volume)
             volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
 
         # # Delete the current volume vmdk because the copy operation does not
