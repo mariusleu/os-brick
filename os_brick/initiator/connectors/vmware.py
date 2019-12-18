@@ -301,8 +301,10 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                     tmp_file_path, session,
                     connection_properties['volume'],
                     connection_properties['volume_id'],
-                    connection_properties['rp_ref'],
-                    connection_properties['vm_folder_ref'],
+                    vim_util.get_moref(connection_properties['rp_ref'],
+                                       'ResourcePool'),
+                    vim_util.get_moref(connection_properties[
+                                           'vm_folder_ref'], 'Folder'),
                     connection_properties['import_spec'],
                     connection_properties['vmdk_size'])
         finally:
