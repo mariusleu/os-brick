@@ -198,7 +198,9 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         return write_handle.get_imported_vm()
 
     def _disconnect(self, tmp_file_path, session, volume, rp_ref,
-                    vm_folder_ref, **kwargs):
+                    vm_folder_ref, name, size_kb, disk_type, ds_name,
+                    profile_id, adapter_type, extra_config, vmdk_size,
+                    volume_id):
 
         volume_ops = VolumeOps(session=session)
         #
@@ -223,13 +225,13 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             # cookies = session.vim.client.options.transport.cookiejar
             # cacerts = self._ca_file if self._ca_file else not self._insecure
             vm_config_spec = volume_ops.get_create_spec(
-                name=kwargs.get('name'),
-                size_kb=kwargs.get('size_kb'),
-                disk_type=kwargs.get('disk_type'),
-                ds_name=kwargs.get('ds_name'),
-                profile_id=kwargs.get('profile_id'),
-                adapter_type=kwargs.get('adapter_type'),
-                extra_config=kwargs.get('extra_config'))
+                name,
+                size_kb,
+                disk_type,
+                ds_name,
+                profile_id,
+                adapter_type,
+                extra_config)
 
             vm_import = volume_ops.import_spec(config_spec=vm_config_spec)
 
@@ -241,10 +243,9 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                             rp_ref,
                                             vm_folder_ref,
                                             vm_import,
-                                            kwargs.get('vmdk_size'))
+                                            vmdk_size)
             volume_ops.delete_backing(volume)
-            volume_ops.update_backing_disk_uuid(imported_vm, kwargs.get(
-                'volume_id'))
+            volume_ops.update_backing_disk_uuid(imported_vm, volume_id)
 
         # # Delete the current volume vmdk because the copy operation does not
         # # overwrite.
@@ -317,9 +318,21 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                             'ResourcePool')
                 vm_folder_ref = vim_util.get_moref(connection_properties[
                                            'vm_folder_ref'], 'Folder')
+                name = connection_properties.get('name')
+                size_kb = connection_properties.get('size_kb')
+                disk_type = connection_properties.get('disk_type')
+                ds_name = connection_properties.get('ds_name')
+                profile_id = connection_properties.get('profile_id')
+                adapter_type = connection_properties.get('adapter_type')
+                extra_config = connection_properties.get('extra_config')
+                vmdk_size = connection_properties.get('vmdk_size')
+                volume_id = connection_properties.get('volume_id')
+
                 self._disconnect(
                     tmp_file_path, session,backing,
-                    rp_ref, vm_folder_ref, **connection_properties)
+                    rp_ref, vm_folder_ref, name, size_kb, disk_type, ds_name,
+                    profile_id, adapter_type, extra_config, vmdk_size,
+                    volume_id)
         finally:
             os.remove(tmp_file_path)
             if session:
