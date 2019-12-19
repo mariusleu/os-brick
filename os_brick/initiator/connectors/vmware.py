@@ -105,6 +105,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         self._insecure = config['vmware_insecure']
         self._tmp_dir = config['vmware_tmp_dir']
         self._timeout = config['vmware_image_transfer_timeout_secs']
+        LOG.debug("Received connection_info '%s'" % connection_properties)
 
     def _create_session(self):
         return api.VMwareAPISession(self._ip,
@@ -704,6 +705,7 @@ class VolumeOps:
             instanceUuid=True)
         if result:
             return result[0]
+
 
 class VirtualDiskType(object):
     """Supported virtual disk types."""
