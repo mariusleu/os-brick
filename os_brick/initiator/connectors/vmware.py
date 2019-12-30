@@ -286,9 +286,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                     connection_properties['lease_info']:
                 lease = vim_util.get_moref(connection_properties['lease'],
                                            'HttpNfcLease')
-                lease_info = vim_util.get_moref(connection_properties[
-                                                    'lease_info'],
-                                                'HttpNfcLeaseInfo')
+                lease_info = connection_properties['lease_info']
+
                 self._disconnect_http_nfc(backing, session, self._ip,
                                           self._port,
                                           lease, lease_info, tmp_file,
