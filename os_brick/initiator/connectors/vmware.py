@@ -304,6 +304,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
     def _disconnect_http_nfc(self, backing, session, host, port, lease,
                              lease_info, file_handle, file_size, timeout_secs):
+        LOG.debug("lease_info is " % lease_info)
+        LOG.debug("lease is %s" % lease)
         write_handle = VmdkWriteHandleLeaseAware(session,
                                                  host,
                                                  port,
