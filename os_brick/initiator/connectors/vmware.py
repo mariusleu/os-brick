@@ -189,7 +189,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                                   cacerts=cacerts)
         image_transfer._start_transfer(read_handle, write_handle, timeout_secs)
 
-    def _disconnect(self, tmp_file_path, session, ds_ref, dc_ref, vmdk_path):
+    def _disconnect(self, tmp_file, tmp_file_path, file_size, session,
+                    ds_ref,  dc_ref, vmdk_path):
         # The restored volume is in compressed (streamOptimized) format.
         # So we upload it to a temporary location in vCenter datastore and copy
         # the compressed vmdk to the volume vmdk. The copy operation
@@ -202,14 +203,13 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         self._create_temp_ds_folder(
             session, six.text_type(ds_path.parent), dc_ref)
 
-        with open(tmp_file_path, "rb") as tmp_file:
-            dc_name = session.invoke_api(
-                vim_util, 'get_object_property', session.vim, dc_ref, 'name')
-            cookies = session.vim.client.options.transport.cookiejar
-            cacerts = self._ca_file if self._ca_file else not self._insecure
-            self._upload_vmdk(
+        dc_name = session.invoke_api(
+            vim_util, 'get_object_property', session.vim, dc_ref, 'name')
+        cookies = session.vim.client.options.transport.cookiejar
+        cacerts = self._ca_file if self._ca_file else not self._insecure
+        self._upload_vmdk(
                 tmp_file, self._ip, self._port, dc_name, dstore.name, cookies,
-                ds_path.rel_path, os.path.getsize(tmp_file_path), cacerts,
+                ds_path.rel_path, file_size, cacerts,
                 self._timeout)
 
         # Delete the current volume vmdk because the copy operation does not
@@ -269,17 +269,83 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                            connection_properties['volume_id'])
                     raise exception.BrickException(message=msg)
 
+                self._disconnect_volume(session, tmp_file_path,
+                                        connection_properties)
+
+        finally:
+            os.remove(tmp_file_path)
+            if session:
+                session.logout()
+
+    def _disconnect_volume(self, session, tmp_file_path,
+                           connection_properties):
+        with open(tmp_file_path, "rb") as tmp_file:
+            file_size = os.path.getsize(tmp_file_path)
+
+            if connection_properties['lease'] and \
+                    connection_properties['lease_info']:
+                lease = vim_util.get_moref(connection_properties['lease'],
+                                           'HttpNfcLease')
+                lease_info = vim_util.get_moref(connection_properties[
+                                                    'lease_info'],
+                                                'HttpNfcLeaseInfo')
+                self._disconnect_http_nfc(session, self._ip, self._port,
+                                          lease, lease_info, tmp_file,
+                                          file_size, self._timeout)
+            else:
                 ds_ref = vim_util.get_moref(
                     connection_properties['datastore'], "Datastore")
                 dc_ref = vim_util.get_moref(
                     connection_properties['datacenter'], "Datacenter")
                 vmdk_path = connection_properties['vmdk_path']
                 self._disconnect(
-                    tmp_file_path, session, ds_ref, dc_ref, vmdk_path)
-        finally:
-            os.remove(tmp_file_path)
-            if session:
-                session.logout()
+                    tmp_file_path, tmp_file, file_size, session, ds_ref,
+                    dc_ref, vmdk_path)
+
+    def _disconnect_http_nfc(self, session, host, port, lease, lease_info,
+                             file_handle, file_size, timeout_secs):
+        write_handle = VmdkWriteHandleLeaseAware(session,
+                                                 host,
+                                                 port,
+                                                 lease,
+                                                 lease_info,
+                                                 file_size,
+                                                 'POST')
+        image_transfer._start_transfer(file_handle, write_handle, timeout_secs)
 
     def extend_volume(self, connection_properties):
         raise NotImplementedError
+
+
+class VmdkWriteHandleLeaseAware(rw_handles.VmdkWriteHandle):
+    """
+    VmdkWriteHandle which takes as parameter an existing lease and lease_info
+    """
+    def __init__(self, session, host, port, lease, lease_info, vmdk_size,
+                 http_method='PUT'):
+        self._vmdk_size = vmdk_size
+        self._bytes_written = 0
+
+        # Find VMDK URL where data is to be written
+        url, thumbprint = self._find_vmdk_url(lease_info, host, port)
+        self._vm_ref = lease_info.entity
+
+        cookies = session.vim.client.options.transport.cookiejar
+        # Create HTTP connection to write to VMDK URL
+        if http_method == 'PUT':
+            overwrite = 't'
+            content_type = 'binary/octet-stream'
+        elif http_method == 'POST':
+            overwrite = None
+            content_type = 'application/x-vnd.vmware-streamVmdk'
+        else:
+            raise ValueError('http_method must be either PUT or POST')
+        self._conn = self._create_write_connection(http_method,
+                                                   url,
+                                                   vmdk_size,
+                                                   cookies=cookies,
+                                                   overwrite=overwrite,
+                                                   content_type=content_type,
+                                                   ssl_thumbprint=thumbprint)
+        super(rw_handles.VmdkWriteHandle, self).__init__(session, lease, url,
+                                                         self._conn)
