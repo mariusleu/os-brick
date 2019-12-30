@@ -269,7 +269,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                            connection_properties['volume_id'])
                     raise exception.BrickException(message=msg)
 
-                self._disconnect_volume(session, tmp_file_path,
+                self._disconnect_volume(backing, session, tmp_file_path,
                                         connection_properties)
 
         finally:
@@ -277,7 +277,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
             if session:
                 session.logout()
 
-    def _disconnect_volume(self, session, tmp_file_path,
+    def _disconnect_volume(self, backing, session, tmp_file_path,
                            connection_properties):
         with open(tmp_file_path, "rb") as tmp_file:
             file_size = os.path.getsize(tmp_file_path)
@@ -289,7 +289,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                 lease_info = vim_util.get_moref(connection_properties[
                                                     'lease_info'],
                                                 'HttpNfcLeaseInfo')
-                self._disconnect_http_nfc(session, self._ip, self._port,
+                self._disconnect_http_nfc(backing, session, self._ip,
+                                          self._port,
                                           lease, lease_info, tmp_file,
                                           file_size, self._timeout)
             else:
@@ -302,8 +303,8 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                     tmp_file_path, tmp_file, file_size, session, ds_ref,
                     dc_ref, vmdk_path)
 
-    def _disconnect_http_nfc(self, session, host, port, lease, lease_info,
-                             file_handle, file_size, timeout_secs):
+    def _disconnect_http_nfc(self, backing, session, host, port, lease,
+                             lease_info, file_handle, file_size, timeout_secs):
         write_handle = VmdkWriteHandleLeaseAware(session,
                                                  host,
                                                  port,
@@ -312,6 +313,30 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                                                  file_size,
                                                  'POST')
         image_transfer._start_transfer(file_handle, write_handle, timeout_secs)
+        uuid = backing.instanceUuid
+        self.delete_backing(backing)
+        vm_ref = write_handle.get_imported_vm()
+        self.update_backing_uuid(vm_ref, uuid)
+
+    def update_backing_uuid(self, backing, uuid):
+        cf = self._session.vim.client.factory
+        reconfig_spec = cf.create('ns0:VirtualMachineConfigSpec')
+        reconfig_spec.instanceUuid = uuid
+        self._reconfigure_backing(backing, reconfig_spec)
+        LOG.debug("Backing: %(backing)s reconfigured with uuid: %(uuid)s.",
+                  {'backing': backing,
+                   'uuid': uuid})
+
+    def delete_backing(self, backing):
+        """Delete the backing.
+        :param backing: Managed object reference to the backing
+        """
+        LOG.debug("Deleting the VM backing: %s.", backing)
+        task = self._session.invoke_api(self._session.vim, 'Destroy_Task',
+                                        backing)
+        LOG.debug("Initiated deletion of VM backing: %s.", backing)
+        self._session.wait_for_task(task)
+        LOG.info("Deleted the VM backing: %s.", backing)
 
     def extend_volume(self, connection_properties):
         raise NotImplementedError
