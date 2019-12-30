@@ -284,7 +284,7 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
             if connection_properties['lease']:
                 lease_data = connection_properties['lease']
-                lease = vim_util.get_moref(connection_properties['lease'],
+                lease = vim_util.get_moref(lease_data['lease'],
                                            'HttpNfcLease')
                 entity = vim_util.get_moref(lease_data['entity'],
                                             'VirtualMachine')
