@@ -282,16 +282,20 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
         with open(tmp_file_path, "rb") as tmp_file:
             file_size = os.path.getsize(tmp_file_path)
 
-            if connection_properties['lease'] and \
-                    connection_properties['lease_info']:
+            if connection_properties['lease']:
+                lease_data = connection_properties['lease']
                 lease = vim_util.get_moref(connection_properties['lease'],
                                            'HttpNfcLease')
-                lease_info = connection_properties['lease_info']
-
-                self._disconnect_http_nfc(backing, session, self._ip,
-                                          self._port,
-                                          lease, lease_info, tmp_file,
-                                          file_size, self._timeout)
+                entity = vim_util.get_moref(lease_data['entity'],
+                                            'VirtualMachine')
+                self._disconnect_http_nfc(backing, session,
+                                          lease_data['device_url'],
+                                          lease_data['ssl_thumbprint'],
+                                          entity,
+                                          lease,
+                                          tmp_file,
+                                          file_size,
+                                          self._timeout)
             else:
                 ds_ref = vim_util.get_moref(
                     connection_properties['datastore'], "Datastore")
@@ -302,15 +306,13 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
                     tmp_file_path, tmp_file, file_size, session, ds_ref,
                     dc_ref, vmdk_path)
 
-    def _disconnect_http_nfc(self, backing, session, host, port, lease,
-                             lease_info, file_handle, file_size, timeout_secs):
-        LOG.debug("lease_info is " % lease_info)
-        LOG.debug("lease is %s" % lease)
+    def _disconnect_http_nfc(self, backing, session, url, thumbprint,
+                             entity, lease, file_handle, file_size, timeout_secs):
         write_handle = VmdkWriteHandleLeaseAware(session,
-                                                 host,
-                                                 port,
+                                                 url,
+                                                 thumbprint,
+                                                 entity,
                                                  lease,
-                                                 lease_info,
                                                  file_size,
                                                  'POST')
         image_transfer._start_transfer(file_handle, write_handle, timeout_secs)
@@ -345,16 +347,15 @@ class VmdkConnector(initiator_connector.InitiatorConnector):
 
 class VmdkWriteHandleLeaseAware(rw_handles.VmdkWriteHandle):
     """
-    VmdkWriteHandle which takes as parameter an existing lease and lease_info
+    VmdkWriteHandle which takes as parameter an existing lease and device url
     """
-    def __init__(self, session, host, port, lease, lease_info, vmdk_size,
-                 http_method='PUT'):
+    def __init__(self, session, url, thumbprint, entity, lease,
+                 vmdk_size, http_method='PUT'):
         self._vmdk_size = vmdk_size
         self._bytes_written = 0
 
         # Find VMDK URL where data is to be written
-        url, thumbprint = self._find_vmdk_url(lease_info, host, port)
-        self._vm_ref = lease_info.entity
+        self._vm_ref = entity
 
         cookies = session.vim.client.options.transport.cookiejar
         # Create HTTP connection to write to VMDK URL
